@@ -138,19 +138,7 @@ int main (int argc, char *argv[])
 		printf("\n");
 	}
 
-/*
- printf("writing mitchjunk3\n");
- f=fopen("mitchjunk3.txt","w");
- for (x=0; x<(1<<(K+F)); x++)
- {
-     for (y=0; y<(1<<(K+F)); y++)
-     {
-	res[(x<<(K+F))+y] = xlns32_sub(argx[(x<<(K+F))+y],argy[(x<<(K+F))+y]);
-        fprintf(f,"%04x\n",res[(x<<(K+F))+y]);
-     }
- }
-fclose(f);
-*/
+
 return 0;
 }
 

@@ -1,5 +1,5 @@
 # xlnscuda
-XLNSCPP: a CUDA package for Logarithmic Number System eXperimentation
+XLNSCUDA: a CUDA package for Logarithmic Number System eXperimentation
 
 This repository provides `xlns16d.cu` and `xlns32d.cu` along with a few programs that illustrate their use. They are translated from similar routines in the xlnscpp repository. The appropriate file (`xlns16.cpp` or `xlns32.cpp`) must be included before including the associated file from this repository.  All these routines are based on similar math foundation (Gaussian logs, sb and db) as the Python xlns repository, but unlike the Python they use different internal storage format.
 

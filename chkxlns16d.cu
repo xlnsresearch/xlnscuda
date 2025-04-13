@@ -1,7 +1,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 //#define xlns16_ideal
-//#define xlns16_alt
+#define xlns16_alt
+//#define xlns16_altopt
 #include "xlns16.cpp"
 #include "xlns16d.cu"
 

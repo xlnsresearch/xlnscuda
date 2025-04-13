@@ -129,19 +129,24 @@ __device__ inline xlns16 xlns16d_add(xlns16 x, xlns16 y)
      
      //                 xlns16d_sb_neg(z);
  
+      #ifdef xlns16_altopt
     xlns16_signed precond = (usedb==0) ? ((-z)>>3) :          // -.125*z
  
                 (z < -(2<<xlns16_F)) ? 5<<(xlns16_F-3):        //  0.625
                                 (z >> 2) + (9 << (xlns16_F-3));//  .25*z + 9/8
      xlns16_signed postcond = (z <= -(3<<xlns16_F)) ? 0:
  
-                            z >= -(3<<(xlns16_F-2)) ? -(1<<(xlns16_F-7)) :
+                            z >= -(3<<(xlns16_F-2)) ? -(1<<(xlns16_F-6)) :
  
-                                                      +(1<<(xlns16_F-7));
+                                                      +(1<<(xlns16_F-6));
      xlns16_signed mitch = (-z >= 1<<xlns16_F)||(usedb==0) ? xlns16d_mitch(z+precond) :
  
                                           -xlns16d_db_ideal(-z)-z; // use ideal for singularity
      adjust = usedb ? -mitch : (z==0) ? 1<<xlns16_F : mitch + postcond;
+      #else
+       adjust = usedb ? xlns16d_db_premit_neg(z) : 
+                        xlns16d_sb_premit_neg(z); 
+      #endif
     #endif
 
     adjustez = (z < -xlns16_esszer) ? 0 : adjust;

@@ -129,6 +129,61 @@ __device__ xlns32 xlns32d_add(xlns32 x, xlns32 y)
 
 #define xlns32d_sub(x,y) xlns32d_add(x,xlns32_neg(y))
 
+__device__ inline int xlns32d_is_zero(xlns32 x)
+{
+	return (xlns32_abs(x) == xlns32_zero);
+}
+
+__device__ inline int xlns32d_is_negative(xlns32 x)
+{
+	return (xlns32_sign(x) != 0) && !xlns32d_is_zero(x);
+}
+
+__device__ inline int xlns32d_is_positive(xlns32 x)
+{
+	return (xlns32_sign(x) == 0) && !xlns32d_is_zero(x);
+}
+
+__device__ inline int xlns32d_gt(xlns32 a, xlns32 b)
+{
+	return xlns32_canon(a) > xlns32_canon(b);
+}
+
+__device__ inline int xlns32d_lt(xlns32 a, xlns32 b)
+{
+	return xlns32_canon(a) < xlns32_canon(b);
+}
+
+__device__ inline int xlns32d_eq(xlns32 a, xlns32 b)
+{
+	return a == b;
+}
+
+__device__ inline int xlns32d_ge(xlns32 a, xlns32 b)
+{
+	return xlns32_canon(a) >= xlns32_canon(b);
+}
+
+__device__ inline int xlns32d_le(xlns32 a, xlns32 b)
+{
+	return xlns32_canon(a) <= xlns32_canon(b);
+}
+
+__device__ inline xlns32 xlns32d_max(xlns32 a, xlns32 b)
+{
+	return xlns32d_gt(a, b) ? a : b;
+}
+
+__device__ inline xlns32 xlns32d_min(xlns32 a, xlns32 b)
+{
+	return xlns32d_lt(a, b) ? a : b;
+}
+
+__device__ inline xlns32 xlns32d_copysign(xlns32 x, xlns32 y)
+{
+	return xlns32_abs(x) | xlns32_sign(y);
+}
+
 /*END OF PORTABLE CODE*/
 
 /*START OF PORTABLE CODE THAT DEPENDS ON <math.h>*/

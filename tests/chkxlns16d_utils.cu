@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 #define xlns16_alt
-#include "xlns16.cpp"
+#include "../xlnscpp/xlns16.cpp"
 #include "../xlns16d.cu"
 
 #define CHECK_CUDA(call) \

@@ -3,7 +3,7 @@
 //#define xlns16_ideal
 #define xlns16_alt
 //#define xlns16_altopt
-#include "xlns16.cpp"
+#include "xlnscpp/xlns16.cpp"
 #include "xlns16d.cu"
 
 #define LNS_TESTS (1048576)
@@ -112,4 +112,3 @@ int main (int argc, char *argv[])
 //	 printf("%d ",res[x]-0x4000-x);
 return 0;
 }
-

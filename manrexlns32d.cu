@@ -3,7 +3,7 @@
 #include <iostream>
 #define xlns32_ideal
 //#define xlns32_alt 
-#include "xlns32.cpp"
+#include "xlnscpp/xlns32.cpp"
 #include "xlns32d.cu"
 
 #define ITER (37)

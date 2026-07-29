@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 #define xlns32_ideal
-#include "xlns32.cpp"
+#include "../xlnscpp/xlns32.cpp"
 #include "../xlns32d.cu"
 
 #define CHECK_CUDA(call) \

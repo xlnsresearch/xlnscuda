@@ -8,7 +8,8 @@ Current repository shape:
 - `xlns16d.cu` and `xlns32d.cu` rely on typedefs/macros from the matching CPU
   implementation file.
 - CPU-vs-GPU parity tests therefore include the matching CPU implementation
-  from the `xlnscpp` subdirectory.
+  from the `xlnscpp` submodule. Initialize it first with
+  `git submodule update --init`.
 
 Example from the `xlnscuda` repository root:
 

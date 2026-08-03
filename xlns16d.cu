@@ -263,8 +263,12 @@ __device__ inline xlns16 xlns16d_copysign(xlns16 x, xlns16 y)
 
 __device__ xlns16 fp2xlns16d(float x)
 {
-	if (x==0.0)
+	if ((x>-2.938747e-39)&&(x<2.938747e-39))
 		return(xlns16_zero);
+        else if (x> 3.40282286e+38)
+		return(xlns16_pos_inf);
+        else if (x< -3.40282286e+38)
+		return(xlns16_neg_inf);
 	else if (x > 0.0)
 		return xlns16_abs((xlns16_signed) ((log(x)/log(2.0))*xlns16_scale))
 		       ^xlns16_logsignmask;

@@ -287,11 +287,101 @@ __device__ float xlns16d2fp(xlns16 x)
 	else {
 		return (float) (+pow(2.0,((double) (((xlns16_signed) (xlns16_abs(x)-xlns16_logsignmask))))
 					/((float) xlns16_scale)));
+<<<<<<< Updated upstream
 	}
 }
 
 
 #include <iostream>
+=======
+	}
+}
+
+__device__ inline xlns16 xlns16d_from_float(float x)
+{
+	return fp2xlns16d(x);
+}
+
+__device__ inline float xlns16d_to_float(xlns16 x)
+{
+	return xlns16d2fp(x);
+}
+
+__global__ void xlns16d_batch_from_float_kernel(const float *src, xlns16 *dst, size_t n)
+{
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t stride = blockDim.x * gridDim.x;
+	for (; i < n; i += stride)
+		dst[i] = xlns16d_from_float(src[i]);
+}
+
+__global__ void xlns16d_batch_to_float_kernel(const xlns16 *src, float *dst, size_t n)
+{
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t stride = blockDim.x * gridDim.x;
+	for (; i < n; i += stride)
+		dst[i] = xlns16d_to_float(src[i]);
+}
+
+__global__ void xlns16d_batch_mul_kernel(const xlns16 *a, const xlns16 *b, xlns16 *c, size_t n)
+{
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t stride = blockDim.x * gridDim.x;
+	for (; i < n; i += stride)
+		c[i] = xlns16d_mul(a[i], b[i]);
+}
+
+__global__ void xlns16d_batch_add_kernel(const xlns16 *a, const xlns16 *b, xlns16 *c, size_t n)
+{
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t stride = blockDim.x * gridDim.x;
+	for (; i < n; i += stride)
+		c[i] = xlns16d_add(a[i], b[i]);
+}
+
+__global__ void xlns16d_batch_sub_kernel(const xlns16 *a, const xlns16 *b, xlns16 *c, size_t n)
+{
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t stride = blockDim.x * gridDim.x;
+	for (; i < n; i += stride)
+		c[i] = xlns16d_sub(a[i], b[i]);
+}
+
+__global__ void xlns16d_batch_div_kernel(const xlns16 *a, const xlns16 *b, xlns16 *c, size_t n)
+{
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t stride = blockDim.x * gridDim.x;
+	for (; i < n; i += stride)
+		c[i] = xlns16d_div(a[i], b[i]);
+}
+
+__global__ void xlns16d_batch_scale_kernel(const xlns16 *a, xlns16 scalar, xlns16 *c, size_t n)
+{
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t stride = blockDim.x * gridDim.x;
+	for (; i < n; i += stride)
+		c[i] = xlns16d_mul(a[i], scalar);
+}
+
+__global__ void xlns16d_batch_neg_kernel(const xlns16 *a, xlns16 *c, size_t n)
+{
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t stride = blockDim.x * gridDim.x;
+	for (; i < n; i += stride)
+		c[i] = xlns16_neg(a[i]);
+}
+
+__global__ void xlns16d_batch_abs_kernel(const xlns16 *a, xlns16 *c, size_t n)
+{
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t stride = blockDim.x * gridDim.x;
+	for (; i < n; i += stride)
+		c[i] = xlns16_abs(a[i]);
+}
+
+
+#include <iostream>
+>>>>>>> Stashed changes
 
 class xlns16d_float {
     xlns16 x;

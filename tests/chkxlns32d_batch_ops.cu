@@ -1,0 +1,242 @@
+#include <float.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define xlns32_ideal
+#include "../xlnscpp/xlns32.cpp"
+#include "../xlns32d.cu"
+
+#define CHECK_CUDA(call) \
+	do { \
+		cudaError_t err = (call); \
+		if (err != cudaSuccess) { \
+			fprintf(stderr, "CUDA error %s:%d: %s\n", \
+				__FILE__, __LINE__, cudaGetErrorString(err)); \
+			exit(1); \
+		} \
+	} while (0)
+
+#define MAX_ERROR_PERCENT 0.001f
+#define THREADS_PER_BLOCK 32
+
+enum BatchOp {
+	OP_MUL,
+	OP_ADD,
+	OP_SUB,
+	OP_DIV,
+	OP_SCALE,
+	OP_NEG,
+	OP_ABS
+};
+
+static float percent_error(float expected, float got)
+{
+	if (expected == got) return 0.0f;
+	if (isinf(expected) || isinf(got)) return INFINITY;
+	float denom = fmaxf(fabsf(expected), FLT_MIN);
+	return fabsf(expected - got) / denom * 100.0f;
+}
+
+static const char *op_name(enum BatchOp op)
+{
+	switch (op) {
+	case OP_MUL: return "mul";
+	case OP_ADD: return "add";
+	case OP_SUB: return "sub";
+	case OP_DIV: return "div";
+	case OP_SCALE: return "scale";
+	case OP_NEG: return "neg";
+	case OP_ABS: return "abs";
+	}
+	return "unknown";
+}
+
+static void fill_expected(enum BatchOp op, const xlns32 *a, const xlns32 *b,
+			  xlns32 scalar, xlns32 *expected, size_t n)
+{
+	switch (op) {
+	case OP_MUL: xlns32_batch_mul(a, b, expected, n); break;
+	case OP_ADD: xlns32_batch_add(a, b, expected, n); break;
+	case OP_SUB: xlns32_batch_sub(a, b, expected, n); break;
+	case OP_DIV: xlns32_batch_div(a, b, expected, n); break;
+	case OP_SCALE: xlns32_batch_scale(a, scalar, expected, n); break;
+	case OP_NEG: xlns32_batch_neg(a, expected, n); break;
+	case OP_ABS: xlns32_batch_abs(a, expected, n); break;
+	}
+}
+
+static void launch_kernel(enum BatchOp op, const xlns32 *d_a, const xlns32 *d_b,
+			  xlns32 scalar, xlns32 *d_c, size_t n)
+{
+	unsigned blocks = (unsigned)((n + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK);
+	if (blocks == 0) blocks = 1;
+	switch (op) {
+	case OP_MUL: xlns32d_batch_mul_kernel<<<blocks, THREADS_PER_BLOCK>>>(d_a, d_b, d_c, n); break;
+	case OP_ADD: xlns32d_batch_add_kernel<<<blocks, THREADS_PER_BLOCK>>>(d_a, d_b, d_c, n); break;
+	case OP_SUB: xlns32d_batch_sub_kernel<<<blocks, THREADS_PER_BLOCK>>>(d_a, d_b, d_c, n); break;
+	case OP_DIV: xlns32d_batch_div_kernel<<<blocks, THREADS_PER_BLOCK>>>(d_a, d_b, d_c, n); break;
+	case OP_SCALE: xlns32d_batch_scale_kernel<<<blocks, THREADS_PER_BLOCK>>>(d_a, scalar, d_c, n); break;
+	case OP_NEG: xlns32d_batch_neg_kernel<<<blocks, THREADS_PER_BLOCK>>>(d_a, d_c, n); break;
+	case OP_ABS: xlns32d_batch_abs_kernel<<<blocks, THREADS_PER_BLOCK>>>(d_a, d_c, n); break;
+	}
+}
+
+static int check_op(const char *case_name, enum BatchOp op,
+		    const xlns32 *a, const xlns32 *b, xlns32 scalar, size_t n,
+		    int print_rows)
+{
+	xlns32 *expected = (xlns32 *)malloc(n * sizeof(expected[0]));
+	xlns32 *got = (xlns32 *)malloc(n * sizeof(got[0]));
+	xlns32 *d_a = 0;
+	xlns32 *d_b = 0;
+	xlns32 *d_c = 0;
+	int failures = 0;
+	int bit_diffs = 0;
+
+	fill_expected(op, a, b, scalar, expected, n);
+
+	CHECK_CUDA(cudaMalloc((void **)&d_a, n * sizeof(a[0])));
+	CHECK_CUDA(cudaMalloc((void **)&d_b, n * sizeof(b[0])));
+	CHECK_CUDA(cudaMalloc((void **)&d_c, n * sizeof(got[0])));
+	CHECK_CUDA(cudaMemcpy(d_a, a, n * sizeof(a[0]), cudaMemcpyHostToDevice));
+	CHECK_CUDA(cudaMemcpy(d_b, b, n * sizeof(b[0]), cudaMemcpyHostToDevice));
+
+	launch_kernel(op, d_a, d_b, scalar, d_c, n);
+	CHECK_CUDA(cudaGetLastError());
+	CHECK_CUDA(cudaDeviceSynchronize());
+	CHECK_CUDA(cudaMemcpy(got, d_c, n * sizeof(got[0]), cudaMemcpyDeviceToHost));
+
+	printf("\n[%s %s]\n", case_name, op_name(op));
+	printf("idx | a fp        | b fp        | CPU bits | GPU bits | CPU fp       | GPU fp       | err %%     | status\n");
+	printf("----|-------------|-------------|----------|----------|--------------|--------------|-----------|--------\n");
+	for (size_t i = 0; i < n; i++) {
+		float expected_fp = xlns322fp(expected[i]);
+		float got_fp = xlns322fp(got[i]);
+		float err = percent_error(expected_fp, got_fp);
+		int bit_same = expected[i] == got[i];
+		int fail = err > MAX_ERROR_PERCENT;
+		if (!bit_same) bit_diffs++;
+		if (fail) failures++;
+		if (print_rows || fail) {
+			printf("%3zu | %+11.4e | %+11.4e | %08x | %08x | %+12.5e | %+12.5e | %9.6f | %s\n",
+			       i, xlns322fp(a[i]), xlns322fp(b[i]), expected[i], got[i],
+			       expected_fp, got_fp, err, fail ? "FAIL" : (bit_same ? "OK" : "ROUND"));
+		}
+	}
+	if (!print_rows && failures == 0)
+		printf("%zu values OK (%d tolerated bit differences)\n", n, bit_diffs);
+
+	CHECK_CUDA(cudaFree(d_a));
+	CHECK_CUDA(cudaFree(d_b));
+	CHECK_CUDA(cudaFree(d_c));
+	free(expected);
+	free(got);
+	return failures;
+}
+
+static void fill_lns_from_float(const float *src, xlns32 *dst, size_t n)
+{
+	for (size_t i = 0; i < n; i++)
+		dst[i] = fp2xlns32((double)src[i]);
+}
+
+static unsigned next_lcg(unsigned *state)
+{
+	*state = *state * 1664525u + 1013904223u;
+	return *state;
+}
+
+static float next_value(unsigned *state)
+{
+	unsigned v = next_lcg(state);
+	int mag = (int)(v % 15u) + 1;
+	float x = (float)mag / 4.0f;
+	return (v & 0x80000000u) ? -x : x;
+}
+
+static void fill_random_lns(xlns32 *a, xlns32 *b, size_t n)
+{
+	unsigned state = 0x1234abcdu;
+	for (size_t i = 0; i < n; i++) {
+		float af = next_value(&state);
+		float bf = next_value(&state);
+		if (bf == 0.0f) bf = 1.0f;
+		a[i] = fp2xlns32((double)af);
+		b[i] = fp2xlns32((double)bf);
+	}
+}
+
+static int check_empty(void)
+{
+	printf("\n[empty]\n");
+	launch_kernel(OP_MUL, 0, 0, xlns32_one, 0, 0);
+	CHECK_CUDA(cudaGetLastError());
+	CHECK_CUDA(cudaDeviceSynchronize());
+	launch_kernel(OP_ADD, 0, 0, xlns32_one, 0, 0);
+	CHECK_CUDA(cudaGetLastError());
+	CHECK_CUDA(cudaDeviceSynchronize());
+	launch_kernel(OP_SUB, 0, 0, xlns32_one, 0, 0);
+	CHECK_CUDA(cudaGetLastError());
+	CHECK_CUDA(cudaDeviceSynchronize());
+	launch_kernel(OP_DIV, 0, 0, xlns32_one, 0, 0);
+	CHECK_CUDA(cudaGetLastError());
+	CHECK_CUDA(cudaDeviceSynchronize());
+	launch_kernel(OP_SCALE, 0, 0, xlns32_one, 0, 0);
+	CHECK_CUDA(cudaGetLastError());
+	CHECK_CUDA(cudaDeviceSynchronize());
+	launch_kernel(OP_NEG, 0, 0, xlns32_one, 0, 0);
+	CHECK_CUDA(cudaGetLastError());
+	CHECK_CUDA(cudaDeviceSynchronize());
+	launch_kernel(OP_ABS, 0, 0, xlns32_one, 0, 0);
+	CHECK_CUDA(cudaGetLastError());
+	CHECK_CUDA(cudaDeviceSynchronize());
+	printf("empty kernels completed\n");
+	return 0;
+}
+
+static int check_case(const char *case_name, const xlns32 *a, const xlns32 *b,
+		      xlns32 scalar, size_t n, int print_rows)
+{
+	int failures = 0;
+	failures += check_op(case_name, OP_MUL, a, b, scalar, n, print_rows);
+	failures += check_op(case_name, OP_ADD, a, b, scalar, n, print_rows);
+	failures += check_op(case_name, OP_SUB, a, b, scalar, n, print_rows);
+	failures += check_op(case_name, OP_DIV, a, b, scalar, n, print_rows);
+	failures += check_op(case_name, OP_SCALE, a, b, scalar, n, print_rows);
+	failures += check_op(case_name, OP_NEG, a, b, scalar, n, print_rows);
+	failures += check_op(case_name, OP_ABS, a, b, scalar, n, print_rows);
+	return failures;
+}
+
+int main(void)
+{
+	const float fixed_a_fp[] = {
+		0.0f, 1.0f, -1.0f, 2.0f, -2.0f, 3.0f,
+		-3.0f, 0.5f, -0.5f, 4.0f, -4.0f, 8.0f
+	};
+	const float fixed_b_fp[] = {
+		1.0f, -1.0f, 1.0f, 3.0f, 3.0f, -3.0f,
+		3.0f, 0.5f, -0.5f, -4.0f, 4.0f, 2.0f
+	};
+	const size_t fixed_n = sizeof(fixed_a_fp) / sizeof(fixed_a_fp[0]);
+	const size_t random_n = 19;
+	xlns32 fixed_a[fixed_n];
+	xlns32 fixed_b[fixed_n];
+	xlns32 random_a[random_n];
+	xlns32 random_b[random_n];
+	xlns32 scalar = fp2xlns32(2.5f);
+	int failures = 0;
+
+	fill_lns_from_float(fixed_a_fp, fixed_a, fixed_n);
+	fill_lns_from_float(fixed_b_fp, fixed_b, fixed_n);
+	fill_random_lns(random_a, random_b, random_n);
+
+	printf("=== xlns32d batch arithmetic CPU vs GPU ===\n");
+	failures += check_empty();
+	failures += check_case("fixed", fixed_a, fixed_b, scalar, fixed_n, 1);
+	failures += check_case("deterministic_random", random_a, random_b, scalar, random_n, 0);
+
+	printf("\nchkxlns32d_batch_ops %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
+	return failures ? 1 : 0;
+}

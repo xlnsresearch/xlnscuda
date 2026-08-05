@@ -193,7 +193,7 @@ __device__ inline xlns32 xlns32d_copysign(xlns32 x, xlns32 y)
 /*END OF PORTABLE CODE THAT DEPENDS ON <math.h>*/
 
 
-__device__ xlns32 fp2xlns32d(float x)
+__device__ xlns32 fp2xlns32d(double x)
 {
 	if ((x>-2.938747e-39)&&(x<2.938747e-39))
 		return(xlns32_zero);

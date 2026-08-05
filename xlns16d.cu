@@ -261,7 +261,7 @@ __device__ inline xlns16 xlns16d_copysign(xlns16 x, xlns16 y)
 /*END OF PORTABLE CODE THAT DEPENDS ON <math.h>*/
 
 
-__device__ xlns16 fp2xlns16d(float x)
+__device__ xlns16 fp2xlns16d(double x)
 {
 	if ((x>-2.938747e-39)&&(x<2.938747e-39))
 		return(xlns16_zero);

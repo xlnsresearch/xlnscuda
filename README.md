@@ -1,6 +1,30 @@
 # xlnscuda
 XLNSCUDA: a CUDA package for Logarithmic Number System eXperimentation
 
+## Compiled ggml kernel API
+
+`include/xlnscuda/ggml-kernels.h` is a small C-compatible launch interface for
+F32 tensors in CUDA device memory. It provides elementwise add/sub/mul/div
+with equal contiguous shapes and 2D matrix multiplication in ggml layout.
+The format mode (`16` or `32`) is selected at each launch. The matrix kernel
+is a simple correctness baseline: one CUDA thread computes each output and
+reduces K terms sequentially. LNS16 uses the device's base addition, not
+xlnscpp's `sum32` reduction. Quantized weights and other ggml operators are
+outside this library's current kernel API.
+
+Build it against an initialized xlnscpp checkout:
+
+```sh
+cmake -S . -B build -DXLNSCPP_DIR=/path/to/xlnscpp -DCMAKE_CUDA_ARCHITECTURES=86
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+`xlnscuda_ggml_smoke` checks both modes with actual device operations. It is
+skipped when no CUDA driver or GPU is available. The xlnscpp include model is
+contained in the library's CUDA translation units; ggml callers include only
+the public header and link `xlnscuda-ggml`.
+
 This repository provides `xlns16d.cu` and `xlns32d.cu` along with a few programs that illustrate their use. They are translated from similar routines in the `xlnscpp` repository. The appropriate C++ file from the `xlnscpp` subdirectory (`xlnscpp/xlns16.cpp` or `xlnscpp/xlns32.cpp`) must be included before including the associated file from this repository.  All these routines are based on similar math foundation (Gaussian logs, sb and db) as the Python xlns repository, but unlike the Python they use different internal storage format.
 
 The `xlnscpp` directory is a git submodule, not a duplicated copy of the C++ repository. After cloning this repository, initialize it with:

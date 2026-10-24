@@ -17,9 +17,49 @@
 //    for the 16-bit format in this file, this is roughly similar to bfloat16
 //    1 sign bit, 8 int(log2) bits, 7 frac(log2) bits
 //    there is an exact representation of 0.0, but no subnormals or NaNs
+//
+// optional xlns16d_table (requires xlns16_table for the host):
+//    mirrors xlns16.cpp's xlns16_table configuration on the device, so device
+//    results are bit-identical to the host ones: conversions, sigmoid, exp and
+//    log use the same lookup tables, and (with xlns16_alt) addition uses the
+//    same 1280-entry sb/db tables. The tables live in device global memory
+//    (about 900 KB) and must be uploaded once per device with
+//    xlns16d_table_init() before any kernel runs.
 
 
 /* PORTABLE CODE STARTS HERE*/
+
+#ifdef xlns16d_table
+  #ifndef xlns16_table
+    #error "xlns16d_table copies the host tables: define xlns16_table before including xlns16.cpp"
+  #endif
+  __device__ xlns16 xlns16d_revcvtbl[131072];
+  __device__ float  xlns16d_cvtbl[65536];
+  __device__ xlns16 xlns16d_sigmoidtbl[65536];
+  __device__ xlns16 xlns16d_exptbl[65536];
+  __device__ xlns16 xlns16d_logtbl[65536];
+  #ifdef xlns16_alt
+  __device__ xlns16_signed xlns16d_sbtbl[xlns16_esszer];
+  __device__ xlns16_signed xlns16d_dbtbl[xlns16_esszer];
+  #endif
+
+  // Upload xlnscpp's host tables to the current device. Until this has run the
+  // device tables are all zero and every table-based result is wrong.
+  inline cudaError_t xlns16d_table_init(void)
+  {
+	cudaError_t err;
+	if ((err = cudaMemcpyToSymbol(xlns16d_revcvtbl, xlns16revcvtbl, sizeof(xlns16revcvtbl))) != cudaSuccess) return err;
+	if ((err = cudaMemcpyToSymbol(xlns16d_cvtbl, xlns16cvtbl, sizeof(xlns16cvtbl))) != cudaSuccess) return err;
+	if ((err = cudaMemcpyToSymbol(xlns16d_sigmoidtbl, xlns16sigmoidtbl, sizeof(xlns16sigmoidtbl))) != cudaSuccess) return err;
+	if ((err = cudaMemcpyToSymbol(xlns16d_exptbl, xlns16exptbl, sizeof(xlns16exptbl))) != cudaSuccess) return err;
+	if ((err = cudaMemcpyToSymbol(xlns16d_logtbl, xlns16logtbl, sizeof(xlns16logtbl))) != cudaSuccess) return err;
+	#ifdef xlns16_alt
+	if ((err = cudaMemcpyToSymbol(xlns16d_sbtbl, xlns16sbtbl, sizeof(xlns16sbtbl))) != cudaSuccess) return err;
+	if ((err = cudaMemcpyToSymbol(xlns16d_dbtbl, xlns16dbtbl, sizeof(xlns16dbtbl))) != cudaSuccess) return err;
+	#endif
+	return cudaSuccess;
+  }
+#endif
 
 inline __device__ xlns16 xlns16d_overflow(xlns16 xlns16_x, xlns16 xlns16_y, xlns16 xlns16_temp)
 {       
@@ -122,9 +162,18 @@ __device__ inline xlns16 xlns16d_add(xlns16 x, xlns16 y)
      float pm1 = usedb ? -1.0 : 1.0;
 
      adjust = z+((xlns16_signed)(log(pm1+pow(2.0,-((double)z)/xlns16_scale))/log(2.0)*xlns16_scale+.5));
+     adjustez = (z < -xlns16_esszer) ? 0 : adjust;
+
+    #elif defined(xlns16d_table)
+
+     // same lookup as xlns16.cpp's xlns16_table path (no esszer clamp: the
+     // index saturates at the last entry instead)
+     xlns16_signed non_ez_z = (z <= -xlns16_esszer) ? xlns16_esszer-1 : -z;
+     adjustez = usedb ? xlns16d_dbtbl[non_ez_z] :
+                        xlns16d_sbtbl[non_ez_z];
 
     #else
-     
+
      //adjust = usedb ? xlns16d_db_neg(z) : 
      
      //                 xlns16d_sb_neg(z);
@@ -144,12 +193,11 @@ __device__ inline xlns16 xlns16d_add(xlns16 x, xlns16 y)
                                           -xlns16d_db_ideal(-z)-z; // use ideal for singularity
      adjust = usedb ? -mitch : (z==0) ? 1<<xlns16_F : mitch + postcond;
       #else
-       adjust = usedb ? xlns16d_db_premit_neg(z) : 
-                        xlns16d_sb_premit_neg(z); 
+       adjust = usedb ? xlns16d_db_premit_neg(z) :
+                        xlns16d_sb_premit_neg(z);
       #endif
+     adjustez = (z < -xlns16_esszer) ? 0 : adjust;
     #endif
-
-    adjustez = (z < -xlns16_esszer) ? 0 : adjust;
 
     return ((z==0) && usedb) ?
  
@@ -272,6 +320,22 @@ __device__ inline xlns16 xlns16d_relu(xlns16 x)
 /*END OF PORTABLE CODE THAT DEPENDS ON <math.h>*/
 
 
+#ifdef xlns16d_table
+
+// xlns16.cpp's table converter takes a float, so narrow first exactly as a
+// host call with a double argument would.
+__device__ xlns16 fp2xlns16d(double x)
+{
+	return xlns16d_revcvtbl[__float_as_uint((float)x) >> 15];
+}
+
+__device__ float xlns16d2fp(xlns16 x)
+{
+	return xlns16d_cvtbl[x];
+}
+
+#else
+
 __device__ xlns16 fp2xlns16d(double x)
 {
 	if ((x>-2.938747e-39)&&(x<2.938747e-39))
@@ -300,6 +364,8 @@ __device__ float xlns16d2fp(xlns16 x)
 					/((float) xlns16_scale)));
 	}
 }
+
+#endif
 
 __device__ inline xlns16 xlns16d_from_float(float x)
 {
@@ -366,6 +432,15 @@ __device__ inline xlns16 xlns16d_min_array(const xlns16 *a, size_t n)
 	return minval;
 }
 
+#ifdef xlns16d_table
+
+__device__ inline xlns16 xlns16d_sigmoid(xlns16 x)
+{
+	return xlns16d_sigmoidtbl[x];
+}
+
+#else
+
 __device__ inline xlns16 xlns16d_sigmoid(xlns16 x)
 {
 	float fx = xlns16d2fp(x);
@@ -374,10 +449,26 @@ __device__ inline xlns16 xlns16d_sigmoid(xlns16 x)
 	return xlns16_logsignmask - xlns16d_sb(sz);
 }
 
+#endif
+
 __device__ inline xlns16 xlns16d_silu(xlns16 x)
 {
 	return xlns16d_mul(x, xlns16d_sigmoid(x));
 }
+
+#ifdef xlns16d_table
+
+__device__ inline xlns16 xlns16d_exp(xlns16 x)
+{
+	return xlns16d_exptbl[x];
+}
+
+__device__ inline xlns16 xlns16d_log(xlns16 x)
+{
+	return xlns16d_logtbl[x];
+}
+
+#else
 
 __device__ inline xlns16 xlns16d_exp(xlns16 x)
 {
@@ -391,6 +482,8 @@ __device__ inline xlns16 xlns16d_log(xlns16 x)
 	if (fx <= 0.0f) return xlns16_zero;
 	return fp2xlns16d(log(fx));
 }
+
+#endif
 
 __device__ inline xlns16 xlns16d_tanh(xlns16 x)
 {
@@ -478,6 +571,21 @@ __device__ inline void xlns16d_softmax_masked(const xlns16 *a, const xlns16 *mas
 	xlns16 total = xlns16d_sum(c, n);
 	for (size_t i = 0; i < n; i++)
 		c[i] = xlns16d_div(c[i], total);
+}
+
+// RMSNorm: dst[i] = x[i] / sqrt(mean(x^2) + eps), a port of xlns16.cpp's
+// xlns16_rms_norm (LNS-native via xlns16_sqrt / xlns16_recip, no float
+// round-trip). dst may alias x: the sum of squares completes before any write.
+__device__ inline void xlns16d_rms_norm(const xlns16 *x, xlns16 *dst, size_t n, xlns16 eps)
+{
+	if (n == 0) return;
+	xlns16 sum_sq = xlns16_zero;
+	for (size_t i = 0; i < n; i++)
+		sum_sq = xlns16d_add(sum_sq, xlns16d_mul(x[i], x[i]));
+	xlns16 mean = xlns16d_mul(sum_sq, fp2xlns16d(1.0f / (float)n));
+	xlns16 inv_rms = xlns16_recip(xlns16_sqrt(xlns16d_add(mean, eps)));
+	for (size_t i = 0; i < n; i++)
+		dst[i] = xlns16d_mul(x[i], inv_rms);
 }
 
 __device__ inline void xlns16d_layernorm(const xlns16 *x, xlns16 *out,

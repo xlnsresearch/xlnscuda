@@ -22,6 +22,8 @@ nvcc -std=c++11 tests/chkxlns16d_helper_functions.cu -o /tmp/chkxlns16d_helper_f
 nvcc -std=c++11 tests/chkxlns32d_helper_functions.cu -o /tmp/chkxlns32d_helper_functions
 nvcc -std=c++11 tests/chkxlns16d_softmax_layernorm.cu -o /tmp/chkxlns16d_softmax_layernorm
 nvcc -std=c++11 tests/chkxlns32d_softmax_layernorm.cu -o /tmp/chkxlns32d_softmax_layernorm
+nvcc -std=c++11 tests/chkxlns16d_table.cu -o /tmp/chkxlns16d_table
+nvcc -std=c++11 tests/chkxlns32d_table.cu -o /tmp/chkxlns32d_table
 
 /tmp/chkxlns16d_utils
 /tmp/chkxlns32d_utils
@@ -31,4 +33,16 @@ nvcc -std=c++11 tests/chkxlns32d_softmax_layernorm.cu -o /tmp/chkxlns32d_softmax
 /tmp/chkxlns32d_helper_functions
 /tmp/chkxlns16d_softmax_layernorm
 /tmp/chkxlns32d_softmax_layernorm
+/tmp/chkxlns16d_table
+/tmp/chkxlns32d_table
 ```
+
+`chkxlns16d_table` and `chkxlns32d_table` check the host-matching configurations
+(`xlns16d_table`, non-ideal `xlns32d`) for bit-exactness against xlnscpp: all
+65536 xlns16 values through every unary function, every x against a strided
+set of y for the binary operations, and long sum / vec_dot / rms_norm / softmax
+reductions. They demand zero mismatches, except that xlns32 conversions (libm
+on both sides) may differ by one ulp.
+
+If your nvcc rejects the default host compiler (CUDA 12.0 supports GCC up to
+12), add `-ccbin g++-12`.

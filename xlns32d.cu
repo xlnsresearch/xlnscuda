@@ -55,8 +55,95 @@ inline __device__ xlns32 xlns32d_div(xlns32 x, xlns32 y)
   {
 	return ((xlns32_signed) ((log( pow(2.0, ((double) z) / xlns32_scale) - 1 )/log(2.0))*xlns32_scale+.5));
   }
-//#else
-// no implementation on CUDA for non-ideal yet
+#else
+  // Non-ideal configuration, ported from xlns32.cpp: sb by table lookup with
+  // linear interpolation, db by cotransformation. Results are bit-identical
+  // to the host. The tables (about 75 KB) live in device global memory and
+  // must be uploaded once per device with xlns32d_table_init().
+  #define xlns32d_sb xlns32d_sb_table
+  #define xlns32d_db xlns32d_dbtrans3
+
+  __device__ unsigned      xlns32d_sbltable[xlns32_tablesize];
+  __device__ unsigned char xlns32d_sbhtable[xlns32_tablesize];
+  __device__ xlns32        xlns32d_db0table[xlns32_db0size];
+  __device__ xlns32        xlns32d_db1table[xlns32_db1size];
+  __device__ xlns32        xlns32d_db2table[xlns32_db2size];
+
+  // Upload xlnscpp's host tables to the current device. Until this has run the
+  // device tables are all zero and every addition is wrong.
+  inline cudaError_t xlns32d_table_init(void)
+  {
+	cudaError_t err;
+	if ((err = cudaMemcpyToSymbol(xlns32d_sbltable, xlns32_sbltable, sizeof(xlns32_sbltable))) != cudaSuccess) return err;
+	if ((err = cudaMemcpyToSymbol(xlns32d_sbhtable, xlns32_sbhtable, sizeof(xlns32_sbhtable))) != cudaSuccess) return err;
+	if ((err = cudaMemcpyToSymbol(xlns32d_db0table, xlns32_db0table, sizeof(xlns32_db0table))) != cudaSuccess) return err;
+	if ((err = cudaMemcpyToSymbol(xlns32d_db1table, xlns32_db1table, sizeof(xlns32_db1table))) != cudaSuccess) return err;
+	return cudaMemcpyToSymbol(xlns32d_db2table, xlns32_db2table, sizeof(xlns32_db2table));
+  }
+
+  // xlns32_sb_macro with locals instead of the host's global scratch variables
+  // (xlns32_z / xlns32_zh), which would race between threads.
+  inline __device__ xlns32 xlns32d_sb_table(xlns32 z)
+  {
+	xlns32 zh = z >> xlns32_zhshift;
+	if (zh >= (xlns32_tablesize-1))
+		return z;
+	return ( (z&xlns32_zhmask)
+	         +(((xlns32)xlns32d_sbhtable[zh])<<16)+xlns32d_sbltable[zh])
+	       +( ( (0x4000-(xlns32_zlmask&
+	                ((xlns32d_sbltable[zh]-xlns32d_sbltable[zh+1]))))
+	            *(z&xlns32_zlmask) )>>xlns32_zhshift );
+  }
+
+  inline __device__ xlns32 xlns32d_dbtrans3(xlns32 z)
+  {
+	xlns32 z0,z1,z2,temp2;
+	z0 =  z & xlns32_db0mask;
+	z1 =  z & xlns32_db1mask;
+	z2 =  z & xlns32_db2mask;
+	if (z1 == 0)
+	{
+		if (z2 == 0)
+		{
+			if (z0 == 0)
+				return 0;
+			else
+				return xlns32d_db0table[z0 >> xlns32_db0shift];
+		}
+		else if (z0 == 0)
+			return xlns32d_db2table[z2];
+		else
+			return xlns32d_db2table[z2] +
+			  xlns32d_sb(z2 +
+		      xlns32d_db0table[z0>> xlns32_db0shift] - xlns32d_db2table[z2]);
+	}
+	else if (z2 == 0)
+	{
+		if (z0 == 0)
+			return xlns32d_db1table[z1 >> xlns32_db1shift];
+		else
+			return xlns32d_db1table[z1 >> xlns32_db1shift] +
+			  xlns32d_sb(z1 +
+		      xlns32d_db0table[z0>> xlns32_db0shift] - xlns32d_db1table[z1 >> xlns32_db1shift]);
+	}
+	else
+	{
+		if (z0 == 0)
+			return xlns32d_db2table[z2] +
+		      xlns32d_sb(z2 +
+			  xlns32d_db1table[z1>> xlns32_db1shift] - xlns32d_db2table[z2]);
+		else
+		{
+			temp2= xlns32d_sb(z1 +
+				xlns32d_db0table[z0>> xlns32_db0shift] - xlns32d_db1table[z1 >> xlns32_db1shift]);
+			return xlns32d_db2table[z2] +
+			  xlns32d_sb(z2 +
+				xlns32d_db1table[z1 >> xlns32_db1shift] +
+				temp2
+		     - xlns32d_db2table[z2]);
+		}
+	}
+  }
 #endif
 
 
@@ -82,9 +169,12 @@ __device__ inline xlns32 xlns32d_add(xlns32 x, xlns32 y)
 
      adjust = z+((xlns32_signed)(log(pm1+pow(2.0,-((double)z)/xlns32_scale))/log(2.0)*xlns32_scale+.5));
 
-    //#else
-    // no implementation on CUDA for non-ideal yet
-    #endif 
+    #else
+
+     adjust = usedb ? z + ((xlns32_signed)xlns32d_db(-z)) :
+                      z + ((xlns32_signed)xlns32d_sb(-z));
+
+    #endif
     adjustez = (z < -xlns32_esszer) ? 0 : adjust;
     return ((z==0) && usedb) ?
                      xlns32_zero :
@@ -410,6 +500,21 @@ __device__ inline void xlns32d_softmax_masked(const xlns32 *a, const xlns32 *mas
 	xlns32 total = xlns32d_sum(c, n);
 	for (size_t i = 0; i < n; i++)
 		c[i] = xlns32d_div(c[i], total);
+}
+
+// RMSNorm: dst[i] = x[i] / sqrt(mean(x^2) + eps), a port of xlns32.cpp's
+// xlns32_rms_norm (LNS-native via xlns32_sqrt / xlns32_recip, no float
+// round-trip). dst may alias x: the sum of squares completes before any write.
+__device__ inline void xlns32d_rms_norm(const xlns32 *x, xlns32 *dst, size_t n, xlns32 eps)
+{
+	if (n == 0) return;
+	xlns32 sum_sq = xlns32_zero;
+	for (size_t i = 0; i < n; i++)
+		sum_sq = xlns32d_add(sum_sq, xlns32d_mul(x[i], x[i]));
+	xlns32 mean = xlns32d_mul(sum_sq, fp2xlns32d(1.0f / (float)n));
+	xlns32 inv_rms = xlns32_recip(xlns32_sqrt(xlns32d_add(mean, eps)));
+	for (size_t i = 0; i < n; i++)
+		dst[i] = xlns32d_mul(x[i], inv_rms);
 }
 
 __device__ inline void xlns32d_layernorm(const xlns32 *x, xlns32 *out,

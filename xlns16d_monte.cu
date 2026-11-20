@@ -95,7 +95,7 @@ __device__ inline xlns16 xlns16d_add_monte(xlns16 x, xlns16 y, xlns16 *state)
 	xlns16 minxyl = (yl>xl) ? xl : yl;
 	xlns16 maxxy  = (xl>yl) ? x  : y;
 	xlns16_signed z = minxyl - (maxxy&xlns16_logmask);
-	xlns16 result = (r>>(16-xlns16_F)) + xlns16d_monte_mitch(z + (xlns16_F<<xlns16_F) + (7<<(xlns16_F-4)));
+	xlns16 result = (r>>(16-xlns16_F)) + xlns16d_monte_mitch(z + (xlns16_F<<xlns16_F) + (15<<(xlns16_F-5)));
 	result = result >> xlns16_F;
 	result &= (z < -((xlns16_F)<<xlns16_F));
 	return normres + ((xlns16_signmask&(x^y)) ? (xlns16)-result : result);
